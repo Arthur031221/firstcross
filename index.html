@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FirstCross: Convex Single-Photon 3D Reconstruction</title>
+<meta name="description" content="FirstCross reconstructs 3D shape from a few single-photon lidar views by solving a short sequence of convex problems on a voxel grid, in about a minute on one GPU.">
+<meta property="og:type" content="website">
+<meta property="og:title" content="FirstCross: Convex Single-Photon 3D Reconstruction from Sparse Views">
+<meta property="og:description" content="Single-photon 3D reconstruction from three views and 1% of the photons, without a network.">
+<meta property="og:url" content="https://arthur031221.github.io/firstcross/">
+<meta property="og:image" content="https://arthur031221.github.io/firstcross/media/share.jpg">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="theme-color" content="#FFFFFF">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230C0F0D'/%3E%3Ccircle cx='9' cy='11' r='2' fill='%23fff'/%3E%3Ccircle cx='20' cy='8' r='2' fill='%23fff'/%3E%3Ccircle cx='15' cy='19' r='2.6' fill='%232B8A3E'/%3E%3Ccircle cx='24' cy='23' r='2' fill='%23fff'/%3E%3C/svg%3E">
+<link rel="preload" href="fonts/alegreyasc-800.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="fonts/alegreya-400.woff2" as="font" type="font/woff2" crossorigin>
+<script>(function (d) {
+  d.classList.add('js');
+  /* the title plays once the text and fonts are ready and the main thread is idle, so a slow start does not use it up */
+  var on = false;
+  var go = function () { if (on) return; on = true; requestAnimationFrame(function () { requestAnimationFrame(function () { d.classList.add('tm-go'); document.dispatchEvent(new Event('tm-go')); }); }); };
+  var idle = function () { (window.requestIdleCallback || function (f) { setTimeout(f, 200); })(go, { timeout: 600 }); };
+  var ready = function () { (document.fonts ? document.fonts.ready : Promise.resolve()).then(idle, idle); };
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', ready); else ready();
+  setTimeout(go, 2000);
+})(document.documentElement);</script>
+<link rel="stylesheet" href="style.css?v=1121c">
+</head>
+<body>
+<a class="skip" href="#abstract">Skip to abstract</a>
+
+<nav class="toc" aria-label="Contents"><ol>
+  <li><a href="#abstract">Abstract</a></li>
+  <li><a href="#method">Method</a></li>
+  <li><a href="#results">Results</a></li>
+  <li class="sub"><a href="#flux">Photon levels</a></li>
+  <li class="sub"><a href="#mesh">Meshes</a></li>
+  <li class="sub"><a href="#forming">Training</a></li>
+  <li class="sub"><a href="#trans">Transients</a></li>
+  <li class="sub"><a href="#rooms">Rooms</a></li>
+  <li><a href="#bibtex">BibTeX</a></li>
+</ol></nav>
+
+<header class="hero" id="top">
+  <div class="media">
+    <h1><span class="name wordmark"><span class="w1">First</span><span class="w2">Cross</span></span><span class="sub">Convex Single-Photon 3D Reconstruction from Sparse Views</span></h1>
+    <p class="authors"><span>Chi-Wei Lee</span>, <span>Cheng-Han Chiang</span>, <span>Yi-Chun Chang</span>, <span>An-Kai Chen</span>, <span>Po-Chih Kuo</span></p>
+    <p class="affil">National Tsing Hua University, Hsinchu, Taiwan</p>
+    <nav class="actions" aria-label="Paper links">
+      <a class="btn" href="paper.pdf">Paper (PDF)</a>
+      <a class="btn" href="https://arxiv.org/abs/2611.26321">arXiv</a>
+      <a class="btn btn-code" href="https://github.com/Arthur031221/firstcross"><svg class="gh" viewBox="0 0 16 16" width="18" height="18" aria-hidden="true" focusable="false"><path fill="currentColor" d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg><span>Code</span></a>
+      <a class="btn" href="#bibtex">BibTeX</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+<section class="teaser" aria-label="Teaser">
+  <figure class="media">
+    <div class="screen crop"><video src="media/turntable_chef.mp4" poster="media/turntable_chef.webp" width="1498" height="1130" muted loop playsinline controls preload="metadata" aria-label="Turntable of the meshes of Transientangelo and FirstCross at each photon level"></video></div>
+    <figcaption>FirstCross reconstructs 3D shape from very few photons. Transientangelo appears at full flux, at 10 PPP and at 1 PPP with adapted settings on photons pooled over 4 × 4 pixels.</figcaption>
+  </figure>
+</section>
+
+<section id="abstract" aria-labelledby="h-abs">
+  <div class="text">
+    <h2 id="h-abs">Abstract</h2>
+    <p>Single-photon lidar records the arrival time of each returning photon, enabling 3D reconstruction from few views and scarce photons. However, leading neural methods such as Transientangelo require over an hour of non-convex per-scene optimization, and their accuracy degrades as photon flux decreases. We propose FirstCross, a network-free approach that instead solves a short sequence of convex problems on a voxel grid. For a solid object, the Poisson likelihood of a ray with given signal and background rates depends on the scene solely through its first crossing, the point where the ray first enters the object. Decomposing this likelihood yields two tractable terms. The first penalizes surfaces in front of detected photons and admits a tight convex closure, namely volume rendering with a running-maximum transmittance in place of NeRF's product transmittance. The second accounts for photons that no surface explains and admits a convex upper bound once the object is assumed to be thick behind each detected surface point. Compared with Transientangelo under its own real-data protocol, FirstCross achieves lower depth error across every test scene, view count, and flux level. With three views and 100 times fewer photons than at the protocol's lowest flux, our mean object depth error stays under half of Transientangelo's with all photons. Given our detected surface points, the best classical fusion has 1.3 to 1.8 times our three-view error across flux levels. On real room-scale captures with 1% of their photons, TransientNeRF has 2.8 to 7.7 times our error. FirstCross lets few-view single-photon scanners cut exposure to 1% and reconstruct an object in about a minute on one GPU.</p>
+  </div>
+</section>
+
+<section id="method" aria-labelledby="h-method">
+  <h2 id="h-method">Method</h2>
+  <figure class="media">
+    <a class="zoom" href="media/fig/pipeline.webp"><img class="plate" src="media/fig/pipeline.webp" width="2063" height="660" alt="Overview of FirstCross on real data: photons of one view, the first crossing of a ray, the convex iterations and the resulting shape" loading="lazy"></a>
+    <figcaption>A ray’s Poisson likelihood splits into two terms. One penalizes a surface in front of detected photons, and its tight convex closure is volume rendering with a running-maximum transmittance.</figcaption>
+  </figure>
+</section>
+
+<section id="results" aria-labelledby="h-res">
+  <h2 id="h-res">Results</h2>
+
+  <div id="flux" class="block" aria-labelledby="h-flux">
+    <h3 id="h-flux">Photon levels</h3>
+    <figure class="media">
+      <p class="lab">Baskets, 2 views.</p>
+      <div class="scroll">
+        <table class="grid">
+          <thead>
+            <tr><th scope="col"><span class="vh">Method</span></th><th scope="col">Full flux</th><th scope="col">10 PPP</th><th scope="col">1 PPP</th><th scope="col">0.1 PPP</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <th scope="row">Ground truth</th>
+              <td><img src="media/tiles/baskets_gt.webp" width="403" height="290" alt="Ground truth mesh of the Baskets scene" loading="lazy"></td>
+              <td class="none" aria-hidden="true"></td><td class="none" aria-hidden="true"></td><td class="none" aria-hidden="true"></td>
+            </tr>
+            <tr>
+              <th scope="row">FirstCross</th>
+              <td><img src="media/tiles/baskets_ours_full.webp" width="403" height="290" alt="FirstCross novel view at full flux" loading="lazy"><span class="v">0.90 mm</span></td>
+              <td><img src="media/tiles/baskets_ours_10.webp" width="403" height="290" alt="FirstCross novel view at 10 PPP" loading="lazy"><span class="v">0.89 mm</span></td>
+              <td><img src="media/tiles/baskets_ours_1.webp" width="403" height="290" alt="FirstCross novel view at 1 PPP" loading="lazy"><span class="v">0.95 mm</span></td>
+              <td><img src="media/tiles/baskets_ours_01.webp" width="403" height="290" alt="FirstCross novel view at 0.1 PPP" loading="lazy"><span class="v">1.17 mm</span></td>
+            </tr>
+            <tr>
+              <th scope="row">Transientangelo</th>
+              <td><img src="media/tiles/baskets_ta_full.webp" width="403" height="290" alt="Transientangelo novel view at full flux" loading="lazy"><span class="v">2.60 mm</span></td>
+              <td><img src="media/tiles/baskets_ta_10.webp" width="403" height="290" alt="Transientangelo novel view at 10 PPP" loading="lazy"><span class="v">4.94 mm</span></td>
+              <td><div class="blank">None below 10 PPP</div></td>
+              <td><div class="blank">None below 10 PPP</div></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <figcaption>Mean object depth MAE over the three-view test scenes is printed under each tile. PPP is the mean photon count of an occupied pixel.</figcaption>
+    </figure>
+
+    <figure class="media tbl">
+      <p class="lab">Mean depth error with the turntable back wall, in millimetres, at each photon level, three views</p>
+      <div class="scroll">
+        <table class="num">
+          <thead>
+            <tr><th scope="col">PPP</th><th scope="col">Full</th><th scope="col">300</th><th scope="col">150</th><th scope="col">50</th><th scope="col">10</th><th scope="col">1</th><th scope="col">0.1</th></tr>
+          </thead>
+          <tbody>
+            <tr><th scope="row">FirstCross</th><td><b>2.97</b></td><td><b>2.96</b></td><td><b>2.97</b></td><td><b>2.95</b></td><td><b>2.97</b></td><td><b>3.03</b></td><td><b>3.25</b></td></tr>
+            <tr><th scope="row">Transientangelo</th><td>4.70</td><td>4.48</td><td>4.78</td><td>none</td><td>7.04</td><td>none</td><td>none</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <figcaption>Our mean depth error stays between 2.95 and 2.97 mm down to 10 PPP. Transientangelo's goes from 4.70 to 7.04 mm over the same range.</figcaption>
+    </figure>
+  </div>
+
+  <div id="mesh" class="block" aria-labelledby="h-mesh">
+    <h3 id="h-mesh">Meshes</h3>
+    <figure class="media m3" id="m3d">
+      <p class="lab">Chef at 1 PPP, 3 views.</p>
+      <div class="m3-stage" tabindex="0">
+        <div class="m3-pre"><img src="media/3d/chef1_ta.webp" width="1040" height="1040" alt="Transientangelo mesh of chef at 1 PPP" decoding="async" loading="lazy"><img src="media/3d/chef1_ours.webp" width="1040" height="1040" alt="FirstCross mesh of chef at 1 PPP" decoding="async" loading="lazy"></div>
+        <canvas aria-label="Meshes of chef at 1 PPP, drag to turn the view" hidden></canvas>
+        <div class="m3-labs" aria-hidden="true"><span>Transientangelo</span><span>FirstCross</span></div>
+      </div>
+      <p class="m3-hint" hidden>Drag to turn the view.</p>
+      <figcaption>With its photons pooled as in ours, the adapted Transientangelo recovers chef and baskets at 1 PPP with 7.6 and 1.9 times our depth error.</figcaption>
+    </figure>
+  </div>
+
+  <div id="forming" class="block" aria-labelledby="h-forming">
+    <h3 id="h-forming">Training</h3>
+    <figure class="media">
+      <p class="lab">Chef at 1 PPP, 3 views.</p>
+      <div class="screen"><video src="media/forming_chef.mp4" poster="media/forming_chef.webp" width="1440" height="960" muted loop playsinline controls preload="metadata" aria-label="Chef taking shape during training, Transientangelo on the left and FirstCross on the right, while the camera turns once around it"></video></div>
+      <figcaption>Both methods build chef from the same photons while the camera turns once around it. Transientangelo runs from step 100 to step 150,000, over an hour of training, and ours from round 1 to round 12, about a minute. Orange marks surface that is not in the true shape and blue marks true surface that is missing, at a 2 cm tolerance.</figcaption>
+    </figure>
+  </div>
+
+  <div id="trans" class="block" aria-labelledby="h-trans">
+    <h3 id="h-trans">Transients</h3>
+    <figure class="media">
+      <div class="screen"><video src="media/transient_chef.mp4" poster="media/transient_chef.webp" width="1264" height="862" muted loop playsinline controls preload="metadata" aria-label="Transients of an unseen view over time: measured, FirstCross and Transientangelo"></video></div>
+      <figcaption>Ours and Transientangelo are compared with the full-flux measurement, each trained at full flux in the upper row and at 10 PPP in the lower row. All panels share one log scale.</figcaption>
+    </figure>
+  </div>
+
+  <div id="rooms" class="block" aria-labelledby="h-rooms">
+    <h3 id="h-rooms">Rooms</h3>
+    <figure class="media rooms">
+      <div class="r-cols"><span style="left:17.6%">Ground truth</span><span style="left:51.6%">Full flux</span><span style="left:82.3%">1% flux</span></div>
+      <div class="r-stage">
+        <img src="media/fig/rooms.webp" width="985" height="1423" alt="Depth of the test rooms at full and 1% flux for TransientNeRF and FirstCross" loading="lazy">
+        <span class="r-row-l" style="top:10.3%">TransientNeRF</span><span class="r-row-l" style="top:26.4%">Ours</span>
+        <span class="r-row-l" style="top:43.2%">TransientNeRF</span><span class="r-row-l" style="top:59.4%">Ours</span>
+        <span class="r-row-l" style="top:76.2%">TransientNeRF</span><span class="r-row-l" style="top:92.3%">Ours</span>
+      </div>
+      <figcaption>On the real rooms of SP-TransientBench with three views, TransientNeRF's depth at 1% flux becomes noisy with spurious surfaces in every room, while ours stays near its full-flux depth. Volumetric (TSDF) fusion of our detected returns still outperforms TransientNeRF at 1% flux.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<section id="bibtex" aria-labelledby="h-bib">
+  <div class="text">
+    <h2 id="h-bib">BibTeX</h2>
+<pre id="bib">@article{lee2026firstcross,
+  title   = {FirstCross: Convex Single-Photon 3D Reconstruction
+             from Sparse Views},
+  author  = {Lee, Chi-Wei and Chiang, Cheng-Han and Chang, Yi-Chun
+             and Chen, An-Kai and Kuo, Po-Chih},
+  journal = {arXiv preprint arXiv:2611.26321},
+  year    = {2026}
+}</pre>
+  </div>
+</section>
+</main>
+
+<footer class="foot">
+  <p>Page layout adapted from the <a href="https://nerfies.github.io/">Nerfies project page</a>.</p>
+</footer>
+<script src="main.js" defer></script>
+</body>
+</html>
